@@ -22,7 +22,6 @@
 
 import os.path
 import urllib
-import shutil
 import string
 
 import duplicity.backend
@@ -96,9 +95,9 @@ class ACDBackend(duplicity.backend.Backend):
             (remote_path, local_dir)
         l = self.subprocess_popen(commandline)
 
-        #            Keep the remote filename and move the file over
+        # Keep the remote filename and move the file over
         try:
-            shutil.move(os.path.join(local_dir, remote_filename), local_path.name)
+            os.rename(os.path.join(local_dir, remote_filename), local_path.name)
         except IOError, e:
             log.FatalError("Unable to move file %s" % e)
 
