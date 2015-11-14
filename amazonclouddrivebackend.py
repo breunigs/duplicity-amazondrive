@@ -125,15 +125,9 @@ class ACDBackend(duplicity.backend.Backend):
                 return str.split()[2]
             else:
                 return None
-        commandline = self.acd_cmd + " resolve '%s'" % \
-              self.parsed_url.path.replace('///','/')
-        node = self.subprocess_popen(commandline)
-        if (node[1]):
-            commandline = self.acd_cmd + " ls '%s'" % node[1].strip()
-            l = self.subprocess_popen(commandline)
-            return filter(lambda x: x, map (dir_split, l[1].split('\n')))
-
-        return
+        commandline = self.acd_cmd + " ls '%s'" % self.parsed_url.path.replace('///','/')
+        l = self.subprocess_popen(commandline)
+        return filter(lambda x: x, map (dir_split, l[1].split('\n')))
 
     def _delete(self, remote_filename):
         """Delete remote_filename"""
