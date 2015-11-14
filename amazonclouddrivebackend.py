@@ -62,16 +62,16 @@ class ACDBackend(duplicity.backend.Backend):
         """Transfer source_path to remote_filename"""
         if not remote_filename:
             remote_filename = source_path.get_filename()
-        #WORKAROUND for acd_cli: cannot specify remote filename
-        #Copy tmp file to the desired remote filename locally and upload
-        #remote_path = os.path.join(urllib.unquote(self.parsed_url.path.lstrip('/')), remote_filename).rstrip()
+
+        # WORKAROUND for acd_cli: cannot specify remote filename
+        # Link tmp file to the desired remote filename locally and upload
         remote_path = urllib.unquote(self.parsed_url.path.replace('///','/'))
         local_real_duplicity_file = os.path.join(os.path.dirname(source_path.name), remote_filename.rstrip())
 
         deleteFile = False
         if(source_path.name != local_real_duplicity_file):
             try:
-                shutil.copy(source_path.name, local_real_duplicity_file)
+                os.link(source_path.name, local_real_duplicity_file)
                 deleteFile = True
             except IOError, e:
                 log.FatalError("Unable to copy " + source_path.name + " to " + local_real_duplicity_file)
