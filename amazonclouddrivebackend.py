@@ -1,5 +1,6 @@
 # -*- Mode:Python; indent-tabs-mode:nil; tab-width:4 -*-
 #
+# Copyright 2015 Stefan Breunig <stefan-duplicity@breunig.xyz>
 # Copyright 2015 Malay Shah <malays@gmail.com>
 # Based on the backend ncftpbackend.py
 #
@@ -54,6 +55,8 @@ class ACDBackend(duplicity.backend.Backend):
         # Use an explicit directory name.
         if self.url_string[-1] != '/':
             self.url_string += '/'
+
+        self.subprocess_popen(self.acd_cmd + " sync")
 
     def _put(self, source_path, remote_filename = None):
         """Transfer source_path to remote_filename"""
