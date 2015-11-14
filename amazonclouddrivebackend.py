@@ -23,6 +23,7 @@
 import os.path
 import urllib
 import string
+import json
 
 import duplicity.backend
 from duplicity import globals
@@ -105,6 +106,17 @@ class ACDBackend(duplicity.backend.Backend):
         if not local_path.exists():
             raise BackendException("File %s not found" % local_path.name)
 
+    def _query(self, remote_filename):
+        remote_path = os.path.join(urllib.unquote(self.parsed_url.path.replace('///', '/')), remote_filename).rstrip()
+        commandline = self.acd_cmd + " metadata '%s'" % remote_path
+        node = self.subprocess_popen(commandline)
+        if (node[0] == 0 and node[1]):
+            try:
+                size = json.loads(node[1])['contentProperties']['size']
+                return {'size': size}
+            except ValueError, e:
+                raise BackendException('Malformed JSON: expected "contentProperties->size" member in %s' % node[1])
+        return {'size': -1}
 
     def _list(self):
         """List files in directory"""
