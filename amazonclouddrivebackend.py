@@ -75,9 +75,9 @@ class ACDBackend(duplicity.backend.Backend):
             except IOError, e:
                 log.FatalError("Unable to copy " + source_path.name + " to " + local_real_duplicity_file)
 
-            commandline = self.acd_cmd + " upload -o '%s' '%s'" % \
-                (local_real_duplicity_file, remote_path)
-            l = self.subprocess_popen(commandline)
+        commandline = self.acd_cmd + " upload -o '%s' '%s'" % \
+            (local_real_duplicity_file, remote_path)
+        l = self.subprocess_popen(commandline)
 
         if (deleteFile):
             try:
