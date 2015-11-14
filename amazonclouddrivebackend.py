@@ -135,11 +135,10 @@ class ACDBackend(duplicity.backend.Backend):
 
         return
 
-    def _delete(self, filename_list):
-        """Delete files in filename_list"""
-        for filename in filename_list:
-            remote_file_path = os.path.join(urllib.unquote(self.parsed_url.path.replace('///', '/')), filename).rstrip()
-            commandline = self.acd_cmd + " rm '%s'" % (remote_file_path)
-            self.subprocess_popen(commandline)
+    def _delete(self, remote_filename):
+        """Delete remote_filename"""
+        remote_file_path = os.path.join(urllib.unquote(self.parsed_url.path.replace('///', '/')), remote_filename).rstrip()
+        commandline = self.acd_cmd + " rm '%s'" % (remote_file_path)
+        self.subprocess_popen(commandline)
 
 duplicity.backend.register_backend("acd", ACDBackend)
