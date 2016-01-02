@@ -71,21 +71,22 @@ class ACDBackend(duplicity.backend.Backend):
         deleteFile = False
         if(source_path.name != local_real_duplicity_file):
             try:
-                os.link(source_path.name, local_real_duplicity_file)
+                os.symlink(source_path.name, local_real_duplicity_file)
                 deleteFile = True
             except IOError, e:
                 log.FatalError("Unable to copy " + source_path.name + " to " + local_real_duplicity_file)
 
         commandline = self.acd_cmd + " upload --force --overwrite '%s' '%s'" % \
             (local_real_duplicity_file, remote_path)
-        l = self.subprocess_popen(commandline)
 
-        if (deleteFile):
-            try:
-                os.remove(local_real_duplicity_file)
-            except OSError, e:
-                log.FatalError("Unable to remove file %s" % e)
-
+        try:
+            l = self.subprocess_popen(commandline)
+        finally:
+            if (deleteFile):
+                try:
+                    os.remove(local_real_duplicity_file)
+                except OSError, e:
+                    log.FatalError("Unable to remove file %s" % e)
 
     def _get(self, remote_filename, local_path):
         """Get remote filename, saving it to local_path"""
