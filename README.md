@@ -25,8 +25,6 @@ acd_cli mkdir --parents /backup/my_new_backup
 duplicity source_path acd:///backup/my_new_backup
 ```
 
-It probably doesn’t support Windows because it hard-links files, which is not supported on that platform. If there are any Windows users, please drop me a note.
-
 # License
 
 Same as Duplicity
