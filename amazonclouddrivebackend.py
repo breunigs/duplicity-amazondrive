@@ -37,16 +37,8 @@ class ACDBackend(duplicity.backend.Backend):
     def __init__(self, parsed_url):
         duplicity.backend.Backend.__init__(self, parsed_url)
 
-        # we expect an error return, so go low-level and ignore it
-        try:
-            p = os.popen(self.acd_cmd + " version")
-            fout = p.read()
-            ret = p.close()
-        except Exception:
-            pass
-        # the expected error is 0
-        if ret != None:
-            log.FatalError(self.acd_cmd + " not found:  Please install acd_cli",
+        if self.which(self.acd_cmd) == None:
+            log.FatalError(self.acd_cmd + ' not found: Please install acd_cli',
                            log.ErrorCode.backend_not_found)
 
         self.parsed_url = parsed_url
