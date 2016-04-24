@@ -30,6 +30,7 @@ from duplicity import globals
 from duplicity import log
 from duplicity.errors import * #@UnusedWildImport
 from duplicity import tempdir
+from duplicity import util
 
 class ACDBackend(duplicity.backend.Backend):
     acd_cmd='acd_cli'
@@ -37,7 +38,15 @@ class ACDBackend(duplicity.backend.Backend):
     def __init__(self, parsed_url):
         duplicity.backend.Backend.__init__(self, parsed_url)
 
-        if self.which(self.acd_cmd) == None:
+        acdcli_exe = None
+        try:
+          # duplicity 0.7.06 and older
+          acdcli_exe = self.which(self.acd_cmd)
+        except AttributeError:
+          # duplicity 0.7.07 and newer
+          acdcli_exe = util.which(self.acd_cmd)
+
+        if acdcli_exe == None:
             log.FatalError(self.acd_cmd + ' not found: Please install acd_cli',
                            log.ErrorCode.backend_not_found)
 
