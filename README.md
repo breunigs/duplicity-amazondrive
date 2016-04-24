@@ -1,10 +1,20 @@
-# Setup
+# Now shipped with duplicity!
+
+If your duplicity version is **newer than 0.7.07**, then you should use the ACD backend shipped with duplicity.
+
+### Update Guide:
+You need to switch your backends from `acd:///some_backup_folder/` to `acd+acdcli:///some_backup_folder/`. The two backends are compatible, so you can switch between them if problems arise. If you are sure the shipped variant works for you, you should delete the old `amazonclouddrivebackend.py`.
+
+## Setup
 
 This backend needs at least Duplicity 0.7+. If you are still using a 0.6 variant, please
 see the [first comment in issue #1](https://github.com/breunigs/duplicity-acdcli/issues/1#issue-117038264)
 on how to make it compatible with the old version.
 
 ```
+# Is it higher than 0.7.07? Then use the bundled "acd+acdli" backend
+duplicity --version
+
 # Linux
 cp amazonclouddrivebackend.py /usr/lib/python2.7/dist-packages/duplicity/backends/
 
@@ -20,7 +30,7 @@ cp ~/downloads/oauth_data ~/.cache/acd_cli
 acd_cli mkdir --parents /backup/my_new_backup
 ```
 
-# Usage
+## Usage
 ```
 duplicity source_path acd:///backup/my_new_backup
 ```
