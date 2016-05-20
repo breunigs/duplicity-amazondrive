@@ -46,6 +46,7 @@ class ACDBackend(duplicity.backend.Backend):
     OAUTH_REDIRECT_URL = 'http://127.0.0.1:53682/'
     OAUTH_SCOPE = ['clouddrive:read_all', 'clouddrive:write']
 
+    # TODO: borrowed from rclone
     CLIENT_ID = 'amzn1.application-oa2-client.6bf18d2d1f5b485c94c8988bb03ad0e7'
     CLIENT_SECRET = '9decbe76f25adab4d9dce361194512c192594038f494f738ed56d7427891db05'
 
@@ -54,9 +55,9 @@ class ACDBackend(duplicity.backend.Backend):
 
         self.import_dependencies()
 
-        self.directory = parsed_url.path.lstrip('/')
+        self.logical_path = parsed_url.path.lstrip('/')
 
-        if self.directory == "":
+        if self.logical_path == "":
             raise BackendException((
                 'You did not specify a path. '
                 'Please specify a path, e.g. acd://duplicity_backups'))
@@ -67,7 +68,7 @@ class ACDBackend(duplicity.backend.Backend):
                 'Your --volsize is bigger than 10 GiB, which is the maximum '
                 'file size on ACD that does not require work arounds.'))
         self.initialize_oauth2_session()
-        # self.resolve_directory()
+        self.resolve_logical_path()
 
     def import_dependencies(self):
         # Import requests and requests-oauthlib
@@ -168,6 +169,40 @@ class ACDBackend(duplicity.backend.Backend):
         self.API_METADATA_URL = urls['metadataUrl']
         self.API_CONTENT_URL = urls['contentUrl']
 
+    def resolve_logical_path(self):
+        """Resolve the logical path into a node id. Non-existing folders will
+        be created."""
+
+        folders_response = self.http_client.get(self.API_METADATA_URL + 'nodes?filters=kind:FOLDER')
+        folders = folders_response.json()['data']
+
+        root_node = (f for f in folders if f.get('isRoot') == True).next()
+        parent_node_id = root_node['id']
+
+        for component in [x for x in self.logical_path.split('/') if x]:
+            candidates = [f for f in folders if f.get('name') == component and
+                parent_node_id in f['parents']]
+
+            if len(candidates) >= 2:
+                log.FatalError(('There are multiple folders with the same name '
+                                'in the same parent. ParentID: %s FolderName: '
+                                '%s' % (parent_node_id, component)))
+            elif len(candidates) == 1:
+                parent_node_id = candidates[0]['id']
+            else:
+                parent_node_id = self.mkdir(parent_node_id, component)
+
+        self.logical_path_id = parent_node_id
+
+    def mkdir(self, parent_node_id, folder_name):
+        """Create folder below given node id. Returns new folder's id."""
+
+        data = { 'name': folder_name, 'parents': [parent_node_id], 'kind' : 'FOLDER' }
+        response = self.http_client.post(
+            self.API_METADATA_URL + 'nodes',
+            data=json.dumps(data))
+        response.raise_for_status()
+        return response.json()['id']
 
     def bytes_available(self):
         quota = self.http_client.get(self.API_METADATA_URL + 'account/quota')
@@ -186,27 +221,7 @@ class ACDBackend(duplicity.backend.Backend):
     def _list(self):
         """List files in backup directory"""
 
-        folders_response = self.http_client.get(self.API_METADATA_URL + 'nodes?filters=kind:FOLDER')
-        folders = folders_response.json()['data']
-
-        root_folder = (f for f in folders if f.get('isRoot') == True).next()
-        parent_folder_id = root_folder['id']
-
-        for component in [x for x in self.directory.split('/') if x]:
-            candidates = [f for f in folders if f.get('name') == component and
-                parent_folder_id in f['parents']]
-
-            if len(candidates) >= 2:
-                log.FatalError(('There are multiple folders with the same name '
-                                'in the same parent. ParentID: %s FolderName: '
-                                '%s' % (parent_folder_id, component)))
-            elif len(candidates) == 1:
-                parent_folder_id = candidates[0]['id']
-            else:
-                # folder doesn't exist
-                return []
-
-        children_response = self.http_client.get(self.API_METADATA_URL + 'nodes/' + parent_folder_id + '/children')
+        children_response = self.http_client.get(self.API_METADATA_URL + 'nodes/' + self.logical_path_id + '/children')
         children = children_response.json()['data']
 
         return [f['name'] for f in children if f['kind'] == 'FILE']
