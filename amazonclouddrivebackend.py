@@ -25,6 +25,8 @@ import urllib
 import string
 import json
 import sys
+import time
+import io
 
 
 import duplicity.backend
@@ -49,6 +51,8 @@ class ACDBackend(duplicity.backend.Backend):
     # TODO: borrowed from rclone
     CLIENT_ID = 'amzn1.application-oa2-client.6bf18d2d1f5b485c94c8988bb03ad0e7'
     CLIENT_SECRET = '9decbe76f25adab4d9dce361194512c192594038f494f738ed56d7427891db05'
+
+    MULTIPART_BOUNDARY = 'DuplicityFormBoundaryd66364f7f8924f7e9d478e19cf4b871d114a1e00262542'
 
     def __init__(self, parsed_url):
         duplicity.backend.Backend.__init__(self, parsed_url)
@@ -208,8 +212,45 @@ class ACDBackend(duplicity.backend.Backend):
         quota = self.http_client.get(self.API_METADATA_URL + 'account/quota')
         quota.json()['available']
 
-    def _put(self, source_path, remote_filename = None):
-        log.FatalError('_put not yet implemented')
+    def multipart_stream(self, metadata, source_path):
+        """Generator for chunked multipart/form-data file upload from streamed input"""
+
+        boundary = self.MULTIPART_BOUNDARY
+
+        yield str.encode('--%s\r\nContent-Disposition: form-data; '
+                         'name="metadata"\r\n\r\n' % boundary +
+                         '%s\r\n' % json.dumps(metadata) +
+                         '--%s\r\n' % boundary)
+        yield b'Content-Disposition: form-data; name="content"; filename="i_love_backups"\r\n'
+        yield b'Content-Type: application/octet-stream\r\n\r\n'
+
+        with source_path.open() as stream:
+            while True:
+                f = stream.read(io.DEFAULT_BUFFER_SIZE)
+                if f:
+                    yield f
+                else:
+                    break
+
+        yield str.encode('\r\n--%s--\r\n' % boundary +
+                         'multipart/form-data; boundary=%s' % boundary)
+
+    def _put(self, source_path, remote_filename):
+        metadata = { 'name': remote_filename, 'kind': 'FILE', 'parents': [self.logical_path_id] }
+        headers = { 'Content-Type': 'multipart/form-data; boundary=%s'
+                                                     % self.MULTIPART_BOUNDARY}
+
+        start = time.time()
+
+        # TODO: doesnt work :/
+        # Attempt 1 failed. HTTPError: 400 Client Error: Bad Request for url: https://content-eu.drive.amazonaws.com/cdproxy/nodes?suppress=deduplication
+        response = self.http_client.post(
+            self.API_CONTENT_URL + 'nodes?suppress=deduplication',
+            data=self.multipart_stream(metadata, source_path))
+        response.raise_for_status()
+
+        log.Debug("PUT file in %fs" % (time.time() - start))
+
 
 
     def _get(self, remote_filename, local_path):
