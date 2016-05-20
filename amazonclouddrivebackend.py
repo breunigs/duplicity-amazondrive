@@ -170,7 +170,7 @@ class ACDBackend(duplicity.backend.Backend):
 
 
     def bytes_available(self):
-        quota = self.http_client.get(self.API_METADATA_URL + '/account/quota')
+        quota = self.http_client.get(self.API_METADATA_URL + 'account/quota')
         quota.json()['available']
 
     def _put(self, source_path, remote_filename = None):
@@ -184,7 +184,33 @@ class ACDBackend(duplicity.backend.Backend):
         log.FatalError('_query not yet implemented')
 
     def _list(self):
-        log.FatalError('_list not yet implemented')
+        """List files in backup directory"""
+
+        folders_response = self.http_client.get(self.API_METADATA_URL + 'nodes?filters=kind:FOLDER')
+        folders = folders_response.json()['data']
+
+        root_folder = (f for f in folders if f.get('isRoot') == True).next()
+        parent_folder_id = root_folder['id']
+
+        for component in [x for x in self.directory.split('/') if x]:
+            candidates = [f for f in folders if f.get('name') == component and
+                parent_folder_id in f['parents']]
+
+            if len(candidates) >= 2:
+                log.FatalError(('There are multiple folders with the same name '
+                                'in the same parent. ParentID: %s FolderName: '
+                                '%s' % (parent_folder_id, component)))
+            elif len(candidates) == 1:
+                parent_folder_id = candidates[0]['id']
+            else:
+                # folder doesn't exist
+                return []
+
+        children_response = self.http_client.get(self.API_METADATA_URL + 'nodes/' + parent_folder_id + '/children')
+        children = children_response.json()['data']
+
+        return [f['name'] for f in children if f['kind'] == 'FILE']
+
 
     def _delete(self, remote_filename):
         log.FatalError('delete not yet implemented')
