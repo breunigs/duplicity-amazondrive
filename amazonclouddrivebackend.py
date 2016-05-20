@@ -24,6 +24,8 @@ import os.path
 import urllib
 import string
 import json
+import sys
+
 
 import duplicity.backend
 from duplicity import globals
@@ -32,109 +34,160 @@ from duplicity.errors import * #@UnusedWildImport
 from duplicity import tempdir
 from duplicity import util
 
+
 class ACDBackend(duplicity.backend.Backend):
-    acd_cmd='acd_cli'
-    """Connect to remote store using acd_cli"""
+    OAUTH_TOKEN_PATH = os.path.expanduser('~/.duplicity_acd_oauthtoken.json')
+
+    API_METADATA_URL = 'https://drive.amazonaws.com/drive/v1/'
+    API_CONTENT_URL = 'https://content-na.drive.amazonaws.com/cdproxy/'
+
+    OAUTH_AUTHORIZE_URL = 'https://www.amazon.com/ap/oa'
+    OAUTH_TOKEN_URL = 'https://api.amazon.com/auth/o2/token'
+    OAUTH_REDIRECT_URL = 'http://127.0.0.1:53682/'
+    OAUTH_SCOPE = ['clouddrive:read_all', 'clouddrive:write']
+
+    CLIENT_ID = 'amzn1.application-oa2-client.6bf18d2d1f5b485c94c8988bb03ad0e7'
+    CLIENT_SECRET = '9decbe76f25adab4d9dce361194512c192594038f494f738ed56d7427891db05'
+
     def __init__(self, parsed_url):
         duplicity.backend.Backend.__init__(self, parsed_url)
 
-        acdcli_exe = None
+        self.import_dependencies()
+
+        self.directory = parsed_url.path.lstrip('/')
+
+        if self.directory == "":
+            raise BackendException((
+                'You did not specify a path. '
+                'Please specify a path, e.g. acd://duplicity_backups'))
+
+        if globals.volsize > (10 * 1024 * 1024 * 1024):
+            # TODO: research 10 GiB limit
+            raise BackendException((
+                'Your --volsize is bigger than 10 GiB, which is the maximum '
+                'file size on ACD that does not require work arounds.'))
+        self.initialize_oauth2_session()
+        # self.resolve_directory()
+
+    def import_dependencies(self):
+        # Import requests and requests-oauthlib
         try:
-          # duplicity 0.7.06 and older
-          acdcli_exe = self.which(self.acd_cmd)
-        except AttributeError:
-          # duplicity 0.7.07 and newer
-          acdcli_exe = util.which(self.acd_cmd)
+            # On debian (and derivatives), get these dependencies using:
+            # apt-get install python-requests python-requests-oauthlib
+            # On fedora (and derivatives), get these dependencies using:
+            # yum install python-requests python-requests-oauthlib
+            global requests
+            global OAuth2Session
+            import requests
+            from requests_oauthlib import OAuth2Session
+        except ImportError:
+            raise BackendException((
+                'OneDrive backend requires python-requests and '
+                'python-requests-oauthlib to be installed. Please install '
+                'them and try again.'))
 
-        if acdcli_exe == None:
-            log.FatalError(self.acd_cmd + ' not found: Please install acd_cli',
-                           log.ErrorCode.backend_not_found)
+    def initialize_oauth2_session(self):
+        def token_updater(token):
+            try:
+                with open(self.OAUTH_TOKEN_PATH, 'w') as f:
+                    json.dump(token, f)
+            except Exception as e:
+                log.Error(('Could not save the OAuth2 token to %s. '
+                           'This means you may need to do the OAuth2 '
+                           'authorization process again soon. '
+                           'Original error: %s' % (
+                               self.OAUTH_TOKEN_PATH, e)))
 
-        self.parsed_url = parsed_url
-        self.url_string = duplicity.backend.strip_auth_from_url(self.parsed_url)
+        token = None
+        try:
+            with open(self.OAUTH_TOKEN_PATH) as f:
+                token = json.load(f)
+        except IOError as e:
+            log.Error(('Could not load OAuth2 token. '
+                       'Trying to create a new one. (original error: %s)' % e))
 
-        # Use an explicit directory name.
-        if self.url_string[-1] != '/':
-            self.url_string += '/'
+        self.http_client = OAuth2Session(
+            self.CLIENT_ID,
+            scope=self.OAUTH_SCOPE,
+            redirect_uri=self.OAUTH_REDIRECT_URL,
+            token=token,
+            auto_refresh_kwargs={
+                'client_id': self.CLIENT_ID,
+                'client_secret': self.CLIENT_SECRET,
+            },
+            auto_refresh_url=self.OAUTH_TOKEN_URL,
+            token_updater=token_updater)
 
-        self.subprocess_popen(self.acd_cmd + " sync")
+        # TODO: needed?
+        # We have to refresh token manually because it's not working "under the
+        # covers"
+        # if token is not None:
+        #     self.http_client.refresh_token(self.OAUTH_TOKEN_URL)
+
+        user_endpoint_response = self.http_client.get(self.API_METADATA_URL
+            + 'account/endpoint')
+        if user_endpoint_response.status_code != requests.codes.ok:
+            token = None
+
+        if token is None:
+            if not sys.stdout.isatty() or not sys.stdin.isatty():
+                log.FatalError(('The OAuth2 token could not be loaded from %s '
+                                'and you are not running duplicity '
+                                'interactively, so duplicity cannot possibly '
+                                'access ACD.' % self.OAUTH_TOKEN_PATH))
+            authorization_url, state = self.http_client.authorization_url(
+                self.OAUTH_AUTHORIZE_URL)
+
+            print ''
+            print ('In order to authorize duplicity to access your ACD, '
+                   'please open the following URL in a browser and copy '
+                   'the URL of the blank page the dialog leads to: %s'
+                    % authorization_url)
+            print ''
+
+            redirected_to = (raw_input('URL of the blank page: ')
+                .replace('http://', 'https://', 1))
+
+            token = self.http_client.fetch_token(
+                self.OAUTH_TOKEN_URL,
+                client_secret=self.CLIENT_SECRET,
+                authorization_response=redirected_to)
+
+            user_endpoint_response = self.http_client.get(self.API_METADATA_URL
+                 + 'account/endpoint')
+            user_endpoint_response.raise_for_status()
+
+            token_updater(token)
+
+        urls = user_endpoint_response.json()
+
+        if 'metadataUrl' not in urls or 'contentUrl' not in urls:
+            log.FatalError('Endpoint Response did not include expected '
+                           'endpoints for this user. Is the token valid?')
+
+        self.API_METADATA_URL = urls['metadataUrl']
+        self.API_CONTENT_URL = urls['contentUrl']
+
+
+    def bytes_available(self):
+        quota = self.http_client.get(self.API_METADATA_URL + '/account/quota')
+        quota.json()['available']
 
     def _put(self, source_path, remote_filename = None):
-        """Transfer source_path to remote_filename"""
-        if not remote_filename:
-            remote_filename = source_path.get_filename()
+        log.FatalError('_put not yet implemented')
 
-        # WORKAROUND for acd_cli: cannot specify remote filename
-        # Link tmp file to the desired remote filename locally and upload
-        remote_path = urllib.unquote(self.parsed_url.path.replace('///','/'))
-        local_real_duplicity_file = os.path.join(os.path.dirname(source_path.name), remote_filename.rstrip())
-
-        deleteFile = False
-        if(source_path.name != local_real_duplicity_file):
-            try:
-                os.symlink(source_path.name, local_real_duplicity_file)
-                deleteFile = True
-            except IOError, e:
-                log.FatalError("Unable to copy " + source_path.name + " to " + local_real_duplicity_file)
-
-        commandline = self.acd_cmd + " upload --force --overwrite '%s' '%s'" % \
-            (local_real_duplicity_file, remote_path)
-
-        try:
-            l = self.subprocess_popen(commandline)
-        finally:
-            if (deleteFile):
-                try:
-                    os.remove(local_real_duplicity_file)
-                except OSError, e:
-                    log.FatalError("Unable to remove file %s" % e)
 
     def _get(self, remote_filename, local_path):
-        """Get remote filename, saving it to local_path"""
-        remote_path = os.path.join(urllib.unquote(self.parsed_url.path.replace('///', '/')), remote_filename).rstrip()
-        local_dir = os.path.dirname(local_path.name)
-        local_filename = os.path.basename(local_path.name)
-        commandline = self.acd_cmd + " download '%s' '%s'" % \
-            (remote_path, local_dir)
-        l = self.subprocess_popen(commandline)
-
-        # Keep the remote filename and move the file over
-        try:
-            os.rename(os.path.join(local_dir, remote_filename), local_path.name)
-        except IOError, e:
-            log.FatalError("Unable to move file %s" % e)
-
-        local_path.setdata()
-        if not local_path.exists():
-            raise BackendException("File %s not found" % local_path.name)
+        log.FatalError('_get not yet implemented')
 
     def _query(self, remote_filename):
-        remote_path = os.path.join(urllib.unquote(self.parsed_url.path.replace('///', '/')), remote_filename).rstrip()
-        commandline = self.acd_cmd + " metadata '%s'" % remote_path
-        node = self.subprocess_popen(commandline)
-        if (node[0] == 0 and node[1]):
-            try:
-                size = json.loads(node[1])['contentProperties']['size']
-                return {'size': size}
-            except ValueError, e:
-                raise BackendException('Malformed JSON: expected "contentProperties->size" member in %s' % node[1])
-        return {'size': -1}
+        log.FatalError('_query not yet implemented')
 
     def _list(self):
-        """List files in directory"""
-        def dir_split (str):
-            if (str):
-                return str.split()[2]
-            else:
-                return None
-        commandline = self.acd_cmd + " ls '%s'" % self.parsed_url.path.replace('///','/')
-        l = self.subprocess_popen(commandline)
-        return filter(lambda x: x, map (dir_split, l[1].split('\n')))
+        log.FatalError('_list not yet implemented')
 
     def _delete(self, remote_filename):
-        """Delete remote_filename"""
-        remote_file_path = os.path.join(urllib.unquote(self.parsed_url.path.replace('///', '/')), remote_filename).rstrip()
-        commandline = self.acd_cmd + " rm '%s'" % (remote_file_path)
-        self.subprocess_popen(commandline)
+        log.FatalError('delete not yet implemented')
+
 
 duplicity.backend.register_backend("acd", ACDBackend)
