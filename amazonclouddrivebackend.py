@@ -87,7 +87,7 @@ class ACDBackend(duplicity.backend.Backend):
             from requests_oauthlib import OAuth2Session
         except ImportError:
             raise BackendException((
-                'OneDrive backend requires python-requests and '
+                'ACD backend requires python-requests and '
                 'python-requests-oauthlib to be installed. Please install '
                 'them and try again.'))
 
@@ -236,21 +236,30 @@ class ACDBackend(duplicity.backend.Backend):
                          'multipart/form-data; boundary=%s' % boundary)
 
     def _put(self, source_path, remote_filename):
+        start = time.time()
+
+        source_size = os.path.getsize(source_path.name)
+        available = self.bytes_available()
+        if source_size > available:
+            raise BackendException((
+                'Out of space: trying to store "%s" (%d bytes), but only '
+                '%d bytes available on ACD.' % (
+                    source_path.name, source_size, available)))
+
         metadata = { 'name': remote_filename, 'kind': 'FILE', 'parents': [self.logical_path_id] }
         headers = { 'Content-Type': 'multipart/form-data; boundary=%s'
                                                      % self.MULTIPART_BOUNDARY}
 
-        start = time.time()
 
-        # TODO: doesnt work :/
-        # Attempt 1 failed. HTTPError: 400 Client Error: Bad Request for url: https://content-eu.drive.amazonaws.com/cdproxy/nodes?suppress=deduplication
+        data = self.multipart_stream(metadata, source_path)
+
         response = self.http_client.post(
             self.API_CONTENT_URL + 'nodes?suppress=deduplication',
-            data=self.multipart_stream(metadata, source_path))
+            data=data,
+            headers=headers)
         response.raise_for_status()
 
         log.Debug("PUT file in %fs" % (time.time() - start))
-
 
 
     def _get(self, remote_filename, local_path):
