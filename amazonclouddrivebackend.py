@@ -58,7 +58,8 @@ class ACDBackend(duplicity.backend.Backend):
         duplicity.backend.Backend.__init__(self, parsed_url)
 
         self.import_dependencies()
-
+        self.names_to_ids = {}
+        self.logical_path_id = None
         self.logical_path = parsed_url.path.lstrip('/')
 
         if self.logical_path == "":
@@ -75,7 +76,6 @@ class ACDBackend(duplicity.backend.Backend):
         self.resolve_logical_path()
 
     def import_dependencies(self):
-        # Import requests and requests-oauthlib
         try:
             # On debian (and derivatives), get these dependencies using:
             # apt-get install python-requests python-requests-oauthlib
@@ -196,7 +196,14 @@ class ACDBackend(duplicity.backend.Backend):
             else:
                 parent_node_id = self.mkdir(parent_node_id, component)
 
+        log.Debug("Backup Folder has node id: %s" % parent_node_id)
         self.logical_path_id = parent_node_id
+
+    def get_file_id(self, remote_filename):
+        if (remote_filename not in self.names_to_ids):
+            self._list()
+
+        return self.names_to_ids.get(remote_filename)
 
     def mkdir(self, parent_node_id, folder_name):
         """Create folder below given node id. Returns new folder's id."""
@@ -210,7 +217,8 @@ class ACDBackend(duplicity.backend.Backend):
 
     def bytes_available(self):
         quota = self.http_client.get(self.API_METADATA_URL + 'account/quota')
-        quota.json()['available']
+        quota.raise_for_status()
+        return quota.json()['available']
 
     def multipart_stream(self, metadata, source_path):
         """Generator for chunked multipart/form-data file upload from streamed input"""
@@ -236,10 +244,9 @@ class ACDBackend(duplicity.backend.Backend):
                          'multipart/form-data; boundary=%s' % boundary)
 
     def _put(self, source_path, remote_filename):
-        start = time.time()
-
         source_size = os.path.getsize(source_path.name)
         available = self.bytes_available()
+
         if source_size > available:
             raise BackendException((
                 'Out of space: trying to store "%s" (%d bytes), but only '
@@ -250,7 +257,6 @@ class ACDBackend(duplicity.backend.Backend):
         headers = { 'Content-Type': 'multipart/form-data; boundary=%s'
                                                      % self.MULTIPART_BOUNDARY}
 
-
         data = self.multipart_stream(metadata, source_path)
 
         response = self.http_client.post(
@@ -259,14 +265,22 @@ class ACDBackend(duplicity.backend.Backend):
             headers=headers)
         response.raise_for_status()
 
-        log.Debug("PUT file in %fs" % (time.time() - start))
-
+        # XXX: The upload may be considered finished before the file shows up
+        # in the file listing. As such, the following is required to avoid race
+        # conditions when duplicity calls _query or _list.
+        self.names_to_ids[response.json()['name']] = response.json()['id']
 
     def _get(self, remote_filename, local_path):
         log.FatalError('_get not yet implemented')
 
     def _query(self, remote_filename):
-        log.FatalError('_query not yet implemented')
+        file_id = self.get_file_id(remote_filename)
+        if file_id is None:
+            return {'size': -1}
+        response = self.http_client.get(self.API_METADATA_URL + 'nodes/' + file_id)
+        response.raise_for_status()
+
+        return {'size': response.json()['contentProperties']['size']}
 
     def _list(self):
         """List files in backup directory"""
@@ -274,11 +288,20 @@ class ACDBackend(duplicity.backend.Backend):
         children_response = self.http_client.get(self.API_METADATA_URL + 'nodes/' + self.logical_path_id + '/children')
         children = children_response.json()['data']
 
-        return [f['name'] for f in children if f['kind'] == 'FILE']
+        files = [f for f in children if f['kind'] == 'FILE']
+
+        self.names_to_ids = { f['name']: f['id'] for f in files }
+
+        return self.names_to_ids.keys()
 
 
     def _delete(self, remote_filename):
-        log.FatalError('delete not yet implemented')
-
+        file_id = self.get_file_id(remote_filename)
+        if file_id is None:
+            raise BackendException((
+                'File "%s" cannot be deleted: it does not exist' % (
+                    remote_filename)))
+        response = self.http_client.put(self.API_METADATA_URL + 'trash/' + file_id)
+        response.raise_for_status()
 
 duplicity.backend.register_backend("acd", ACDBackend)
