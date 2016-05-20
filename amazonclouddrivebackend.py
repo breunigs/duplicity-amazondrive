@@ -247,7 +247,20 @@ class ACDBackend(duplicity.backend.Backend):
         self.names_to_ids[response.json()['name']] = response.json()['id']
 
     def _get(self, remote_filename, local_path):
-        log.FatalError('_get not yet implemented')
+        with local_path.open('wb') as f:
+            file_id = self.get_file_id(remote_filename)
+            if file_id is None:
+                raise BackendException((
+                    'File "%s" cannot be downloaded: it does not exist' % (
+                        remote_filename)))
+
+            response = self.http_client.get(
+                self.content_url + '/nodes/' + file_id + '/content', stream=True)
+            response.raise_for_status()
+            for chunk in response.iter_content(chunk_size=DEFAULT_BUFFER_SIZE):
+                if chunk:
+                    f.write(chunk)
+            f.flush()
 
     def _query(self, remote_filename):
         file_id = self.get_file_id(remote_filename)
