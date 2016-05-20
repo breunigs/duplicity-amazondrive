@@ -1,8 +1,7 @@
 # -*- Mode:Python; indent-tabs-mode:nil; tab-width:4 -*-
 #
-# Copyright 2015 Stefan Breunig <stefan-duplicity@breunig.xyz>
-# Copyright 2015 Malay Shah <malays@gmail.com>
-# Based on the backend ncftpbackend.py
+# Copyright 2016 Stefan Breunig <stefan-duplicity@breunig.xyz>
+# Based on the backend onedrivebackend.py
 #
 # This file is part of duplicity.
 #
@@ -21,27 +20,16 @@
 # Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 
 import os.path
-import urllib
-import string
 import json
 import sys
-import time
-import io
-
+from io import DEFAULT_BUFFER_SIZE
 
 import duplicity.backend
 from duplicity import globals
 from duplicity import log
-from duplicity.errors import * #@UnusedWildImport
-from duplicity import tempdir
-from duplicity import util
-
 
 class ACDBackend(duplicity.backend.Backend):
     OAUTH_TOKEN_PATH = os.path.expanduser('~/.duplicity_acd_oauthtoken.json')
-
-    API_METADATA_URL = 'https://drive.amazonaws.com/drive/v1/'
-    API_CONTENT_URL = 'https://content-na.drive.amazonaws.com/cdproxy/'
 
     OAUTH_AUTHORIZE_URL = 'https://www.amazon.com/ap/oa'
     OAUTH_TOKEN_URL = 'https://api.amazon.com/auth/o2/token'
@@ -57,7 +45,9 @@ class ACDBackend(duplicity.backend.Backend):
     def __init__(self, parsed_url):
         duplicity.backend.Backend.__init__(self, parsed_url)
 
-        self.import_dependencies()
+        self.metadata_url = 'https://drive.amazonaws.com/drive/v1/'
+        self.content_url = 'https://content-na.drive.amazonaws.com/cdproxy/'
+
         self.names_to_ids = {}
         self.logical_path_id = None
         self.logical_path = parsed_url.path.lstrip('/')
@@ -68,10 +58,13 @@ class ACDBackend(duplicity.backend.Backend):
                 'Please specify a path, e.g. acd://duplicity_backups'))
 
         if globals.volsize > (10 * 1024 * 1024 * 1024):
-            # TODO: research 10 GiB limit
+            # https://forums.developer.amazon.com/questions/22713/file-size-limits.html
+            # https://forums.developer.amazon.com/questions/22038/support-for-chunked-transfer-encoding.html
             raise BackendException((
                 'Your --volsize is bigger than 10 GiB, which is the maximum '
                 'file size on ACD that does not require work arounds.'))
+
+        self.import_dependencies()
         self.initialize_oauth2_session()
         self.resolve_logical_path()
 
@@ -123,13 +116,10 @@ class ACDBackend(duplicity.backend.Backend):
             auto_refresh_url=self.OAUTH_TOKEN_URL,
             token_updater=token_updater)
 
-        # TODO: needed?
-        # We have to refresh token manually because it's not working "under the
-        # covers"
-        # if token is not None:
-        #     self.http_client.refresh_token(self.OAUTH_TOKEN_URL)
+        if token is not None:
+            self.http_client.refresh_token(self.OAUTH_TOKEN_URL)
 
-        user_endpoint_response = self.http_client.get(self.API_METADATA_URL
+        user_endpoint_response = self.http_client.get(self.metadata_url
             + 'account/endpoint')
         if user_endpoint_response.status_code != requests.codes.ok:
             token = None
@@ -158,26 +148,19 @@ class ACDBackend(duplicity.backend.Backend):
                 client_secret=self.CLIENT_SECRET,
                 authorization_response=redirected_to)
 
-            user_endpoint_response = self.http_client.get(self.API_METADATA_URL
+            user_endpoint_response = self.http_client.get(self.metadata_url
                  + 'account/endpoint')
             user_endpoint_response.raise_for_status()
-
             token_updater(token)
 
         urls = user_endpoint_response.json()
-
         if 'metadataUrl' not in urls or 'contentUrl' not in urls:
-            log.FatalError('Endpoint Response did not include expected '
-                           'endpoints for this user. Is the token valid?')
-
-        self.API_METADATA_URL = urls['metadataUrl']
-        self.API_CONTENT_URL = urls['contentUrl']
+            log.FatalError('Could not retrieve endpoint URLs for this account.')
+        self.metadata_url = urls['metadataUrl']
+        self.content_url = urls['contentUrl']
 
     def resolve_logical_path(self):
-        """Resolve the logical path into a node id. Non-existing folders will
-        be created."""
-
-        folders_response = self.http_client.get(self.API_METADATA_URL + 'nodes?filters=kind:FOLDER')
+        folders_response = self.http_client.get(self.metadata_url + 'nodes?filters=kind:FOLDER')
         folders = folders_response.json()['data']
 
         root_node = (f for f in folders if f.get('isRoot') == True).next()
@@ -206,23 +189,14 @@ class ACDBackend(duplicity.backend.Backend):
         return self.names_to_ids.get(remote_filename)
 
     def mkdir(self, parent_node_id, folder_name):
-        """Create folder below given node id. Returns new folder's id."""
-
         data = { 'name': folder_name, 'parents': [parent_node_id], 'kind' : 'FOLDER' }
         response = self.http_client.post(
-            self.API_METADATA_URL + 'nodes',
+            self.metadata_url + 'nodes',
             data=json.dumps(data))
         response.raise_for_status()
         return response.json()['id']
 
-    def bytes_available(self):
-        quota = self.http_client.get(self.API_METADATA_URL + 'account/quota')
-        quota.raise_for_status()
-        return quota.json()['available']
-
     def multipart_stream(self, metadata, source_path):
-        """Generator for chunked multipart/form-data file upload from streamed input"""
-
         boundary = self.MULTIPART_BOUNDARY
 
         yield str.encode('--%s\r\nContent-Disposition: form-data; '
@@ -234,7 +208,7 @@ class ACDBackend(duplicity.backend.Backend):
 
         with source_path.open() as stream:
             while True:
-                f = stream.read(io.DEFAULT_BUFFER_SIZE)
+                f = stream.read(DEFAULT_BUFFER_SIZE)
                 if f:
                     yield f
                 else:
@@ -244,8 +218,11 @@ class ACDBackend(duplicity.backend.Backend):
                          'multipart/form-data; boundary=%s' % boundary)
 
     def _put(self, source_path, remote_filename):
+        quota = self.http_client.get(self.metadata_url + 'account/quota')
+        quota.raise_for_status()
+        available = quota.json()['available']
+
         source_size = os.path.getsize(source_path.name)
-        available = self.bytes_available()
 
         if source_size > available:
             raise BackendException((
@@ -256,11 +233,10 @@ class ACDBackend(duplicity.backend.Backend):
         metadata = { 'name': remote_filename, 'kind': 'FILE', 'parents': [self.logical_path_id] }
         headers = { 'Content-Type': 'multipart/form-data; boundary=%s'
                                                      % self.MULTIPART_BOUNDARY}
-
         data = self.multipart_stream(metadata, source_path)
 
         response = self.http_client.post(
-            self.API_CONTENT_URL + 'nodes?suppress=deduplication',
+            self.content_url + 'nodes?suppress=deduplication',
             data=data,
             headers=headers)
         response.raise_for_status()
@@ -277,15 +253,13 @@ class ACDBackend(duplicity.backend.Backend):
         file_id = self.get_file_id(remote_filename)
         if file_id is None:
             return {'size': -1}
-        response = self.http_client.get(self.API_METADATA_URL + 'nodes/' + file_id)
+        response = self.http_client.get(self.metadata_url + 'nodes/' + file_id)
         response.raise_for_status()
 
         return {'size': response.json()['contentProperties']['size']}
 
     def _list(self):
-        """List files in backup directory"""
-
-        children_response = self.http_client.get(self.API_METADATA_URL + 'nodes/' + self.logical_path_id + '/children')
+        children_response = self.http_client.get(self.metadata_url + 'nodes/' + self.logical_path_id + '/children')
         children = children_response.json()['data']
 
         files = [f for f in children if f['kind'] == 'FILE']
@@ -301,7 +275,7 @@ class ACDBackend(duplicity.backend.Backend):
             raise BackendException((
                 'File "%s" cannot be deleted: it does not exist' % (
                     remote_filename)))
-        response = self.http_client.put(self.API_METADATA_URL + 'trash/' + file_id)
+        response = self.http_client.put(self.metadata_url + 'trash/' + file_id)
         response.raise_for_status()
 
-duplicity.backend.register_backend("acd", ACDBackend)
+duplicity.backend.register_backend('acd', ACDBackend)
