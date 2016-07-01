@@ -40,10 +40,10 @@ class ACDBackend(duplicity.backend.Backend):
     OAUTH_AUTHORIZE_URL = 'https://www.amazon.com/ap/oa'
     OAUTH_TOKEN_URL = 'https://api.amazon.com/auth/o2/token'
     OAUTH_REDIRECT_URL = 'http://127.0.0.1/'
-    OAUTH_SCOPE = ['clouddrive:read_all', 'clouddrive:write']
+    OAUTH_SCOPE = ['clouddrive:read_other', 'clouddrive:write']
 
-    CLIENT_ID = 'amzn1.application-oa2-client.58ce9e181e9d4f8bbc13f81b39de58a2'
-    CLIENT_SECRET = 'e19a7eb073aa47eb7745604bebdb6f517843b158d9101d6f9998069a795f0052'
+    CLIENT_ID = 'amzn1.application-oa2-client.791c9c2d78444e85a32eb66f92eb6bcc'
+    CLIENT_SECRET = '5b322c6a37b25f16d848a6a556eddcc30314fc46ae65c87068ff1bc4588d715b'
 
     MULTIPART_BOUNDARY = 'DuplicityFormBoundaryd66364f7f8924f7e9d478e19cf4b871d114a1e00262542'
 
