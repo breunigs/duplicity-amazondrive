@@ -29,13 +29,14 @@ from duplicity.errors import BackendException
 from duplicity import globals
 from duplicity import log
 
-class ACDBackend(duplicity.backend.Backend):
+class AmazonDriveBackend(duplicity.backend.Backend):
     """
-    Backend for AmazonCloudDrive. It communicates directly with ACD using their
-    RESTful API and does not rely on externally setup software (like acd_cli).
+    Backend for AmazonDrive. It communicates directly with AmazonDrive using
+    their RESTful API and does not rely on externally setup software (like
+    acd_cli).
     """
 
-    OAUTH_TOKEN_PATH = os.path.expanduser('~/.duplicity_acd_oauthtoken.json')
+    OAUTH_TOKEN_PATH = os.path.expanduser('~/.duplicity_amazondrive_oauthtoken.json')
 
     OAUTH_AUTHORIZE_URL = 'https://www.amazon.com/ap/oa'
     OAUTH_TOKEN_URL = 'https://api.amazon.com/auth/o2/token'
@@ -62,7 +63,7 @@ class ACDBackend(duplicity.backend.Backend):
             # https://forums.developer.amazon.com/questions/22038/support-for-chunked-transfer-encoding.html
             raise BackendException(
                 'Your --volsize is bigger than 10 GiB, which is the maximum '
-                'file size on ACD that does not require work arounds.')
+                'file size on AmazonDrive that does not require work arounds.')
 
         try:
             global requests
@@ -71,7 +72,7 @@ class ACDBackend(duplicity.backend.Backend):
             from requests_oauthlib import OAuth2Session
         except ImportError:
             raise BackendException(
-                'ACD backend requires python-requests and '
+                'AmazonDrive backend requires python-requests and '
                 'python-requests-oauthlib to be installed.\n\n'
                 'For Debian and derivates use:\n'
                 '  apt-get install python-requests python-requests-oauthlib\n'
@@ -82,7 +83,7 @@ class ACDBackend(duplicity.backend.Backend):
         self.resolve_backup_target()
 
     def initialize_oauth2_session(self):
-        """Setup or refresh oauth2 session with ACD"""
+        """Setup or refresh oauth2 session with AmazonDrive"""
 
         def token_updater(token):
             """Stores oauth2 token on disk"""
@@ -128,14 +129,15 @@ class ACDBackend(duplicity.backend.Backend):
                 log.FatalError('The OAuth2 token could not be loaded from %s '
                                'and you are not running duplicity '
                                'interactively, so duplicity cannot possibly '
-                               'access ACD.' % self.OAUTH_TOKEN_PATH)
+                               'access AmazonDrive.' % self.OAUTH_TOKEN_PATH)
             authorization_url, _ = self.http_client.authorization_url(
                 self.OAUTH_AUTHORIZE_URL)
 
             print ''
-            print ('In order to authorize duplicity to access your ACD, please '
-                   'open the following URL in a browser and copy the URL of '
-                   'the blank page the dialog leads to: %s' % authorization_url)
+            print ('In order to authorize duplicity to access your '
+                   'AmazonDrive, please open the following URL in a browser '
+                   'and copy the URL the blank page the dialog leads to: '
+                   '%s' % authorization_url)
             print ''
 
             redirected_to = (raw_input('URL of the blank page: ')
@@ -225,7 +227,7 @@ class ACDBackend(duplicity.backend.Backend):
                          'multipart/form-data; boundary=%s' % boundary)
 
     def _put(self, source_path, remote_filename):
-        """Upload a local file to ACD"""
+        """Upload a local file to AmazonDrive"""
 
         quota = self.http_client.get(self.metadata_url + 'account/quota')
         quota.raise_for_status()
@@ -236,7 +238,7 @@ class ACDBackend(duplicity.backend.Backend):
         if source_size > available:
             raise BackendException(
                 'Out of space: trying to store "%s" (%d bytes), but only '
-                '%d bytes available on ACD.' % (
+                '%d bytes available on AmazonDrive.' % (
                     source_path.name, source_size, available))
 
         metadata = {'name': remote_filename, 'kind': 'FILE', 'parents': [self.backup_target_id]}
@@ -256,7 +258,7 @@ class ACDBackend(duplicity.backend.Backend):
         self.names_to_ids[response.json()['name']] = response.json()['id']
 
     def _get(self, remote_filename, local_path):
-        """Download file from ACD"""
+        """Download file from AmazonDrive"""
 
         with local_path.open('wb') as local_file:
             file_id = self.get_file_id(remote_filename)
@@ -274,7 +276,7 @@ class ACDBackend(duplicity.backend.Backend):
             local_file.flush()
 
     def _query(self, remote_filename):
-        """Retrieve file size info from ACD"""
+        """Retrieve file size info from AmazonDrive"""
 
         file_id = self.get_file_id(remote_filename)
         if file_id is None:
@@ -285,7 +287,7 @@ class ACDBackend(duplicity.backend.Backend):
         return {'size': response.json()['contentProperties']['size']}
 
     def _list(self):
-        """List files in ACD backup folder"""
+        """List files in AmazonDrive backup folder"""
 
         children_response = self.http_client.get(
             self.metadata_url + 'nodes/' + self.backup_target_id + '/children')
@@ -299,7 +301,7 @@ class ACDBackend(duplicity.backend.Backend):
 
 
     def _delete(self, remote_filename):
-        """Delete file from ACD"""
+        """Delete file from AmazonDrive"""
 
         file_id = self.get_file_id(remote_filename)
         if file_id is None:
@@ -310,4 +312,4 @@ class ACDBackend(duplicity.backend.Backend):
         response.raise_for_status()
         del self.names_to_ids[remote_filename]
 
-duplicity.backend.register_backend('acd', ACDBackend)
+duplicity.backend.register_backend('amazondrive', AmazonDriveBackend)
