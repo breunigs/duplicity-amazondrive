@@ -10,7 +10,7 @@ You need to switch your backends from `acd:///some_backup_folder/` to `acd+acdcl
 This backend needs at least Duplicity 0.7+. Older versions are incompatible and will not function properly.
 
 ```
-# Is it higher than 0.7.07? Then use the bundled "acd+acdli" backend
+# Is it higher than 0.7.07? Then use the bundled "acd+acdcli" backend
 duplicity --version
 
 # Linux
