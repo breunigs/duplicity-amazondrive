@@ -22,6 +22,7 @@
 import os.path
 import json
 import sys
+import re
 from io import DEFAULT_BUFFER_SIZE
 
 import duplicity.backend
@@ -162,15 +163,21 @@ class AmazonDriveBackend(duplicity.backend.Backend):
     def resolve_backup_target(self):
         """Resolve node id for remote backup target folder"""
 
-        folders_response = self.http_client.get(self.metadata_url + 'nodes?filters=kind:FOLDER')
-        folders = folders_response.json()['data']
-
-        root_node = (f for f in folders if f.get('isRoot')).next()
-        parent_node_id = root_node['id']
+        response = self.http_client.get(
+            self.metadata_url + 'nodes?filters=kind:FOLDER AND isRoot:true')
+        parent_node_id = response.json()['data'][0]['id']
 
         for component in [x for x in self.backup_target.split('/') if x]:
-            candidates = [f for f in folders if f.get('name') == component and
-                          parent_node_id in f['parents']]
+            # There doesn't seem to be escaping support, so cut off filter
+            # after first unsupported character
+            filter = re.search('^[A-Za-z0-9_-]*', component).group(0)
+            if component != filter:
+                filter = filter + '*'
+
+            matches = self.read_all_pages(
+                self.metadata_url + 'nodes?filters=kind:FOLDER AND name:%s '
+                                    'AND parents:%s' % (filter, parent_node_id))
+            candidates = [f for f in matches if f.get('name') == component]
 
             if len(candidates) >= 2:
                 log.FatalError('There are multiple folders with the same name '
@@ -225,6 +232,33 @@ class AmazonDriveBackend(duplicity.backend.Backend):
 
         yield str.encode('\r\n--%s--\r\n' % boundary +
                          'multipart/form-data; boundary=%s' % boundary)
+
+    def read_all_pages(self, url):
+        """Iterates over nodes API URL until all pages were read"""
+
+        result = []
+        next_token = ''
+        token_param = '&startToken=' if '?' in url else '?startToken='
+
+        while True:
+            paginated_url = url + token_param + next_token
+            json_response = self.http_client.get(paginated_url).json()
+
+            result.extend(json_response['data'])
+
+            # Amazon's documentation incorrectly states that the nextToken is
+            # always present. The second condition is as per documentation:
+            # https://developer.amazon.com/public/apis/experience/cloud-drive/content/nodes#Pagination
+            if 'nextToken' not in json_response or len(json_response['data']) == 0:
+                break
+
+            # Do not make another HTTP request if everything is here already
+            if len(result) >= json_response['count']:
+                break
+
+            next_token = json_response['nextToken']
+
+        return result
 
     def _put(self, source_path, remote_filename):
         """Upload a local file to AmazonDrive"""
@@ -289,16 +323,13 @@ class AmazonDriveBackend(duplicity.backend.Backend):
     def _list(self):
         """List files in AmazonDrive backup folder"""
 
-        children_response = self.http_client.get(
-            self.metadata_url + 'nodes/' + self.backup_target_id + '/children')
-        children = children_response.json()['data']
-
-        files = [f for f in children if f['kind'] == 'FILE']
+        files = self.read_all_pages(
+            self.metadata_url + 'nodes/' + self.backup_target_id +
+            '/children?filters=kind:FILE')
 
         self.names_to_ids = {f['name']: f['id'] for f in files}
 
         return self.names_to_ids.keys()
-
 
     def _delete(self, remote_filename):
         """Delete file from AmazonDrive"""
