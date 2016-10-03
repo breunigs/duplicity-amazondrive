@@ -287,7 +287,7 @@ class AmazonDriveBackend(duplicity.backend.Backend):
         if response.status_code == 409: # "409 : Duplicate file exists."
             remote_size = self._query(remote_filename)['size']
             if source_size != remote_size:
-                log.Error('Amazon reports that %s already exits. Local size: %d.'
+                log.FatalError('Amazon reports that %s already exits. Local size: %d.'
                           ' Remote size: %d.' % (remote_filename, source_size, remote_size))
             else:
                 log.Debug('Amazon reported %s already exists. Local and remote '
