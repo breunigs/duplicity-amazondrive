@@ -291,14 +291,20 @@ class AmazonDriveBackend(duplicity.backend.Backend):
                           ' Remote size: %d.' % (remote_filename, source_size, remote_size))
             else:
                 log.Debug('Amazon reported %s already exists. Local and remote '
-                          'size match, continuing.')
+                          'size match, continuing.' % remote_filename)
+            return
         else:
             response.raise_for_status()
+
+        json = response.json()
+        if 'id' not in json:
+            log.Warn('%s was uploaded, but returned JSON does not contain ID of '
+                      'new file. Retrying.\nJSON:\n\n%s' % (remote_filename, json))
 
         # XXX: The upload may be considered finished before the file shows up
         # in the file listing. As such, the following is required to avoid race
         # conditions when duplicity calls _query or _list.
-        self.names_to_ids[response.json()['name']] = response.json()['id']
+        self.names_to_ids[response.json()['name']] = json['id']
 
     def _get(self, remote_filename, local_path):
         """Download file from AmazonDrive"""
