@@ -275,7 +275,15 @@ class AmazonDriveBackend(duplicity.backend.Backend):
                 '%d bytes available on AmazonDrive.' % (
                     source_path.name, source_size, available))
 
-        metadata = {'name': remote_filename, 'kind': 'FILE', 'parents': [self.backup_target_id]}
+        # Just check the cached list, to avoid _list for every new file being
+        # uploaded
+        if remote_filename in self.names_to_ids:
+            log.Debug('File %s seems to already exist on AmazonDrive. Deleting '
+                      'before attempting to upload it again.' % remote_filename)
+            self._delete(remote_filename)
+
+        metadata = {'name': remote_filename, 'kind': 'FILE',
+                    'parents': [self.backup_target_id]}
         headers = {'Content-Type': 'multipart/form-data; boundary=%s'
                                    % self.MULTIPART_BOUNDARY}
         data = self.multipart_stream(metadata, source_path)
@@ -284,22 +292,21 @@ class AmazonDriveBackend(duplicity.backend.Backend):
             self.content_url + 'nodes?suppress=deduplication',
             data=data,
             headers=headers)
+
         if response.status_code == 409: # "409 : Duplicate file exists."
-            remote_size = self._query(remote_filename)['size']
-            if source_size != remote_size:
-                log.FatalError('Amazon reports that %s already exits. Local size: %d.'
-                          ' Remote size: %d.' % (remote_filename, source_size, remote_size))
-            else:
-                log.Debug('Amazon reported %s already exists. Local and remote '
-                          'size match, continuing.' % remote_filename)
-            return
+            self._delete(remote_filename)
+            log.FatalError('Upload failed, because there was a file with the '
+                           'same name as %s already present. The file was '
+                           'deleted, and duplicity will retry the upload unless '
+                           'the retry limit has been reached.' % remote_filename)
         else:
             response.raise_for_status()
 
         json = response.json()
         if 'id' not in json:
-            log.Warn('%s was uploaded, but returned JSON does not contain ID of '
-                      'new file. Retrying.\nJSON:\n\n%s' % (remote_filename, json))
+            log.FatalError('%s was uploaded, but returned JSON does not contain '
+                           'ID of new file. Retrying.\nJSON:\n\n%s'
+                           % (remote_filename, json))
 
         # XXX: The upload may be considered finished before the file shows up
         # in the file listing. As such, the following is required to avoid race
