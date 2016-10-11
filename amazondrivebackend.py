@@ -62,7 +62,7 @@ class AmazonDriveBackend(duplicity.backend.Backend):
         if globals.volsize > (10 * 1024 * 1024 * 1024):
             # https://forums.developer.amazon.com/questions/22713/file-size-limits.html
             # https://forums.developer.amazon.com/questions/22038/support-for-chunked-transfer-encoding.html
-            raise BackendException(
+            log.FatalError(
                 'Your --volsize is bigger than 10 GiB, which is the maximum '
                 'file size on AmazonDrive that does not require work arounds.')
 
@@ -295,8 +295,8 @@ class AmazonDriveBackend(duplicity.backend.Backend):
 
         if response.status_code == 409: # "409 : Duplicate file exists."
             self._delete(remote_filename)
-            log.FatalError('Upload failed, because there was a file with the '
-                           'same name as %s already present. The file was '
+            raise BackendException('Upload failed, because there was a file with '
+                           'the same name as %s already present. The file was '
                            'deleted, and duplicity will retry the upload unless '
                            'the retry limit has been reached.' % remote_filename)
         else:
@@ -304,8 +304,8 @@ class AmazonDriveBackend(duplicity.backend.Backend):
 
         json = response.json()
         if 'id' not in json:
-            log.FatalError('%s was uploaded, but returned JSON does not contain '
-                           'ID of new file. Retrying.\nJSON:\n\n%s'
+            raise BackendException('%s was uploaded, but returned JSON does not '
+                           'contain ID of new file. Retrying.\nJSON:\n\n%s'
                            % (remote_filename, json))
 
         # XXX: The upload may be considered finished before the file shows up
