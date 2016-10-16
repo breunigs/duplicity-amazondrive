@@ -141,7 +141,7 @@ class AmazonDriveBackend(duplicity.backend.Backend):
             print ('In order to allow duplicity to access AmazonDrive, please '
                    'open the following URL in a browser and copy the URL of the '
                    'page you see after authorization here:')
-            print (authorization_url)
+            print authorization_url
             print ''
 
             redirected_to = (raw_input('URL of the resulting page: ')
@@ -173,13 +173,13 @@ class AmazonDriveBackend(duplicity.backend.Backend):
         for component in [x for x in self.backup_target.split('/') if x]:
             # There doesn't seem to be escaping support, so cut off filter
             # after first unsupported character
-            filter = re.search('^[A-Za-z0-9_-]*', component).group(0)
-            if component != filter:
-                filter = filter + '*'
+            query = re.search('^[A-Za-z0-9_-]*', component).group(0)
+            if component != query:
+                query = query + '*'
 
             matches = self.read_all_pages(
                 self.metadata_url + 'nodes?filters=kind:FOLDER AND name:%s '
-                                    'AND parents:%s' % (filter, parent_node_id))
+                                    'AND parents:%s' % (query, parent_node_id))
             candidates = [f for f in matches if f.get('name') == component]
 
             if len(candidates) >= 2:
@@ -305,16 +305,16 @@ class AmazonDriveBackend(duplicity.backend.Backend):
         else:
             response.raise_for_status()
 
-        json = response.json()
-        if 'id' not in json:
+        parsed = response.json()
+        if 'id' not in parsed:
             raise BackendException('%s was uploaded, but returned JSON does not '
-                           'contain ID of new file. Retrying.\nJSON:\n\n%s'
-                           % (remote_filename, json))
+                                   'contain ID of new file. Retrying.\nJSON:\n\n%s'
+                                   % (remote_filename, parsed))
 
         # XXX: The upload may be considered finished before the file shows up
         # in the file listing. As such, the following is required to avoid race
         # conditions when duplicity calls _query or _list.
-        self.names_to_ids[response.json()['name']] = json['id']
+        self.names_to_ids[response.parsed()['name']] = parsed['id']
 
     def _get(self, remote_filename, local_path):
         """Download file from AmazonDrive"""
