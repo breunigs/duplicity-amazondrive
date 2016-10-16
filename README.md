@@ -1,7 +1,8 @@
 
 ## Setup
 
-This backend needs at least Duplicity 0.7+.
+This backend needs at least Duplicity 0.7+ and python-requests python-requests-oauthlib
+
 
 ```
 # Linux
