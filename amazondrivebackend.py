@@ -43,7 +43,7 @@ class AmazonDriveBackend(duplicity.backend.Backend):
     OAUTH_TOKEN_URL = 'https://api.amazon.com/auth/o2/token'
     # NOTE: Amazon requires https, which is why I am using my domain/setup
     # instead of Duplicity's. Mail me at stefan-duplicity@breunig.xyz once it is
-    # and I will whitelist the new URL.
+    # available through https and I will whitelist the new URL.
     OAUTH_REDIRECT_URL = 'https://breunig.xyz/duplicity/copy.html'
     OAUTH_SCOPE = ['clouddrive:read_other', 'clouddrive:write']
 
