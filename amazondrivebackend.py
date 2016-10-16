@@ -41,7 +41,10 @@ class AmazonDriveBackend(duplicity.backend.Backend):
 
     OAUTH_AUTHORIZE_URL = 'https://www.amazon.com/ap/oa'
     OAUTH_TOKEN_URL = 'https://api.amazon.com/auth/o2/token'
-    OAUTH_REDIRECT_URL = 'http://127.0.0.1/'
+    # NOTE: Amazon requires https, which is why I am using my domain/setup
+    # instead of Duplicity's. Mail me at stefan-duplicity@breunig.xyz once it is
+    # and I will whitelist the new URL.
+    OAUTH_REDIRECT_URL = 'https://breunig.xyz/duplicity/copy.html'
     OAUTH_SCOPE = ['clouddrive:read_other', 'clouddrive:write']
 
     CLIENT_ID = 'amzn1.application-oa2-client.791c9c2d78444e85a32eb66f92eb6bcc'
@@ -135,13 +138,13 @@ class AmazonDriveBackend(duplicity.backend.Backend):
                 self.OAUTH_AUTHORIZE_URL)
 
             print ''
-            print ('In order to authorize duplicity to access your '
-                   'AmazonDrive, please open the following URL in a browser '
-                   'and copy the URL the blank page the dialog leads to: '
-                   '%s' % authorization_url)
+            print ('In order to allow duplicity to access AmazonDrive, please '
+                   'open the following URL in a browser and copy the URL of the '
+                   'page you see after authorization here:')
+            print (authorization_url)
             print ''
 
-            redirected_to = (raw_input('URL of the blank page: ')
+            redirected_to = (raw_input('URL of the resulting page: ')
                              .replace('http://', 'https://', 1))
 
             token = self.http_client.fetch_token(
