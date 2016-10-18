@@ -309,16 +309,20 @@ class AmazonDriveBackend(duplicity.backend.Backend):
                                    % self.MULTIPART_BOUNDARY}
         data = self.multipart_stream(metadata, source_path)
 
-        try:
-            response = self.http_client.post(
-                self.content_url + 'nodes?suppress=deduplication',
-                data=data,
-                headers=headers)
-        except requests.ConnectionError as err:
-            log.Info('%s upload failed. Speculatively waiting for %d seconds '
-                     'to see if AmazonDrive finished the upload correctly, but '
-                     'closed the connection before returning the result. args=%s'
-                     % (remote_filename, self.WAIT_ON_UPLOAD_ERROR_SECONDS, err))
+        response = self.http_client.post(
+            self.content_url + 'nodes?suppress=deduplication',
+            data=data,
+            headers=headers)
+
+        if response.status_code == 409: # "409 : Duplicate file exists."
+            self.raise_for_existing_file(remote_filename)
+        elif response.status_code == 201:
+            log.Debug('%s uploaded successfully' % remote_filename)
+        elif response.status_code == 408 or response.status_code == 504:
+            log.Info('%s upload failed with timeout status code=%d. Speculatively '
+                     'waiting for %d seconds to see if AmazonDrive finished the '
+                     'upload anyway' % (remote_filename, response.status_code,
+                                        self.WAIT_ON_UPLOAD_ERROR_SECONDS))
             tries = self.WAIT_ON_UPLOAD_ERROR_SECONDS / 15
             while tries >= 0:
                 tries -= 1
@@ -336,11 +340,6 @@ class AmazonDriveBackend(duplicity.backend.Backend):
                     self.raise_for_existing_file(remote_filename)
             raise BackendException('%s upload failed and file did not show up '
                                    'within time limit.' % remote_filename)
-
-        if response.status_code == 409: # "409 : Duplicate file exists."
-            self.raise_for_existing_file(remote_filename)
-        elif response.status_code == 201:
-            log.Debug('%s uploaded successfully' % remote_filename)
         else:
             log.Debug('%s upload returned an undesirable status code %s'
                       % (remote_filename, response.status_code))
