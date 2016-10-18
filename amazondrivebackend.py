@@ -251,21 +251,25 @@ class AmazonDriveBackend(duplicity.backend.Backend):
 
         while True:
             paginated_url = url + token_param + next_token
-            json_response = self.http_client.get(paginated_url).json()
+            response = self.http_client.get(paginated_url)
+            if response.status_code != 200:
+                log.Warn("Pagination failed with status=%s, but will continue "
+                         "anyway in case the info we need was already read. "
+                         "URL=%s" % (response.status_code, url))
 
-            result.extend(json_response['data'])
-
-            # Amazon's documentation incorrectly states that the nextToken is
-            # always present. The second condition is as per documentation:
-            # https://developer.amazon.com/public/apis/experience/cloud-drive/content/nodes#Pagination
-            if 'nextToken' not in json_response or len(json_response['data']) == 0:
+            parsed = response.json()
+            if 'data' in parsed and len(parsed['data']) > 0:
+                result.extend(parsed['data'])
+            else:
                 break
 
             # Do not make another HTTP request if everything is here already
-            if len(result) >= json_response['count']:
+            if len(result) >= parsed['count']:
                 break
 
-            next_token = json_response['nextToken']
+            if 'nextToken' not in parsed:
+                break
+            next_token = parsed['nextToken']
 
         return result
 
