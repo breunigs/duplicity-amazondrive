@@ -253,9 +253,8 @@ class AmazonDriveBackend(duplicity.backend.Backend):
             paginated_url = url + token_param + next_token
             response = self.http_client.get(paginated_url)
             if response.status_code != 200:
-                log.Warn("Pagination failed with status=%s, but will continue "
-                         "anyway in case the info we need was already read. "
-                         "URL=%s" % (response.status_code, url))
+                raise BackendException("Pagination failed with status=%s on "
+                                       "URL=%s" % (response.status_code, url))
 
             parsed = response.json()
             if 'data' in parsed and len(parsed['data']) > 0:
