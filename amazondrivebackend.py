@@ -22,6 +22,7 @@
 import os.path
 import json
 import sys
+import time
 import re
 from io import DEFAULT_BUFFER_SIZE
 
@@ -51,6 +52,11 @@ class AmazonDriveBackend(duplicity.backend.Backend):
     CLIENT_SECRET = '5b322c6a37b25f16d848a6a556eddcc30314fc46ae65c87068ff1bc4588d715b'
 
     MULTIPART_BOUNDARY = 'DuplicityFormBoundaryd66364f7f8924f7e9d478e19cf4b871d114a1e00262542'
+
+    # Time to speculatively wait on upload error and see if the upload finished
+    # correctly, but AmazonDrive returns the wrong error code. This is a known
+    # issue with AmazonDrive.
+    WAIT_ON_UPLOAD_ERROR_SECONDS = globals.timeout
 
     def __init__(self, parsed_url):
         duplicity.backend.Backend.__init__(self, parsed_url)
@@ -263,6 +269,13 @@ class AmazonDriveBackend(duplicity.backend.Backend):
 
         return result
 
+    def raise_for_existing_file(self, remote_filename):
+        self._delete(remote_filename)
+        raise BackendException('Upload failed, because there was a file with '
+                               'the same name as %s already present. The file was '
+                               'deleted, and duplicity will retry the upload unless '
+                               'the retry limit has been reached.' % remote_filename)
+
     def _put(self, source_path, remote_filename):
         """Upload a local file to AmazonDrive"""
 
@@ -291,18 +304,41 @@ class AmazonDriveBackend(duplicity.backend.Backend):
                                    % self.MULTIPART_BOUNDARY}
         data = self.multipart_stream(metadata, source_path)
 
-        response = self.http_client.post(
-            self.content_url + 'nodes?suppress=deduplication',
-            data=data,
-            headers=headers)
+        try:
+            response = self.http_client.post(
+                self.content_url + 'nodes?suppress=deduplication',
+                data=data,
+                headers=headers)
+        except requests.ConnectionError as err:
+            log.Info('%s upload failed. Speculatively waiting for %d seconds '
+                     'to see if AmazonDrive finished the upload correctly, but '
+                     'closed the connection before returning the result. '
+                     'type=%s args=%s' % (remote_filename, type(err), err))
+            tries = self.WAIT_ON_UPLOAD_ERROR_SECONDS / 15
+            while tries >= 0:
+                tries -= 1
+                time.sleep(15)
+
+                remote_size = self._query(remote_filename)['size']
+                if source_size == remote_size:
+                    log.Debug('Upload turned out to be successful after all.')
+                    return
+                elif remote_size == -1:
+                    log.Debug('Uploaded file is not yet there, %d tries left.'
+                              % (tries+1))
+                    continue
+                else:
+                    self.raise_for_existing_file(remote_filename)
+            raise BackendException('%s upload failed and file did not show up '
+                                   'within time limit.' % remote_filename)
 
         if response.status_code == 409: # "409 : Duplicate file exists."
-            self._delete(remote_filename)
-            raise BackendException('Upload failed, because there was a file with '
-                           'the same name as %s already present. The file was '
-                           'deleted, and duplicity will retry the upload unless '
-                           'the retry limit has been reached.' % remote_filename)
+            self.raise_for_existing_file(remote_filename)
+        elif response.status_code == 201:
+            log.Debug('%s uploaded successfully' % remote_filename)
         else:
+            log.Debug('%s upload returned an undesirable status code'
+                      % (remote_filename, response.status_code))
             response.raise_for_status()
 
         parsed = response.json()
