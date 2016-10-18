@@ -273,6 +273,8 @@ class AmazonDriveBackend(duplicity.backend.Backend):
         return result
 
     def raise_for_existing_file(self, remote_filename):
+        """Report error when file already existed in location and delete it"""
+
         self._delete(remote_filename)
         raise BackendException('Upload failed, because there was a file with '
                                'the same name as %s already present. The file was '
@@ -315,8 +317,8 @@ class AmazonDriveBackend(duplicity.backend.Backend):
         except requests.ConnectionError as err:
             log.Info('%s upload failed. Speculatively waiting for %d seconds '
                      'to see if AmazonDrive finished the upload correctly, but '
-                     'closed the connection before returning the result. '
-                     'type=%s args=%s' % (remote_filename, type(err), err))
+                     'closed the connection before returning the result. args=%s'
+                     % (remote_filename, self.WAIT_ON_UPLOAD_ERROR_SECONDS, err))
             tries = self.WAIT_ON_UPLOAD_ERROR_SECONDS / 15
             while tries >= 0:
                 tries -= 1
@@ -340,7 +342,7 @@ class AmazonDriveBackend(duplicity.backend.Backend):
         elif response.status_code == 201:
             log.Debug('%s uploaded successfully' % remote_filename)
         else:
-            log.Debug('%s upload returned an undesirable status code'
+            log.Debug('%s upload returned an undesirable status code %s'
                       % (remote_filename, response.status_code))
             response.raise_for_status()
 
