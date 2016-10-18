@@ -350,7 +350,7 @@ class AmazonDriveBackend(duplicity.backend.Backend):
         # XXX: The upload may be considered finished before the file shows up
         # in the file listing. As such, the following is required to avoid race
         # conditions when duplicity calls _query or _list.
-        self.names_to_ids[response.parsed()['name']] = parsed['id']
+        self.names_to_ids[parsed['name']] = parsed['id']
 
     def _get(self, remote_filename, local_path):
         """Download file from AmazonDrive"""
