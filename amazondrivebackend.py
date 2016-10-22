@@ -53,11 +53,6 @@ class AmazonDriveBackend(duplicity.backend.Backend):
 
     MULTIPART_BOUNDARY = 'DuplicityFormBoundaryd66364f7f8924f7e9d478e19cf4b871d114a1e00262542'
 
-    # Time to speculatively wait on upload error and see if the upload finished
-    # correctly, but AmazonDrive returns the wrong error code. This is a known
-    # issue with AmazonDrive.
-    WAIT_ON_UPLOAD_ERROR_SECONDS = globals.timeout
-
     def __init__(self, parsed_url):
         duplicity.backend.Backend.__init__(self, parsed_url)
 
@@ -322,8 +317,8 @@ class AmazonDriveBackend(duplicity.backend.Backend):
             log.Info('%s upload failed with timeout status code=%d. Speculatively '
                      'waiting for %d seconds to see if AmazonDrive finished the '
                      'upload anyway' % (remote_filename, response.status_code,
-                                        self.WAIT_ON_UPLOAD_ERROR_SECONDS))
-            tries = self.WAIT_ON_UPLOAD_ERROR_SECONDS / 15
+                                        globals.timeout))
+            tries = globals.timeout / 15
             while tries >= 0:
                 tries -= 1
                 time.sleep(15)
