@@ -1,23 +1,30 @@
+## Shipped with Duplicity 0.8+
+
+This backend has already been merged upstream and will be included in Duplicity 0.8+. If you have any bug reports, please direct them at the Duplicity mailing list at duplicity-talk@nongnu.org.
+
 
 ## Setup
 
-This backend needs at least Duplicity 0.7+ and python-requests python-requests-oauthlib
+This backend needs at least Duplicity 0.7+ and python-requests python-requests-oauthlib. 
 
 
 ```
+# All Platforms: Obtain most recent version:
+wget http://bazaar.launchpad.net/~duplicity-team/duplicity/0.8-series/view/head:/duplicity/backends/adbackend.py
+
 # Linux
-cp amazondrivebackend.py /usr/lib/python2.7/dist-packages/duplicity/backends/
+cp adbackend.py /usr/lib/python2.7/dist-packages/duplicity/backends/
 
 # MacOS X
-cp amazondrivebackend.py /Library/Frameworks/Python.framework/Versions/2.7/lib/python2.7/site-packages/duplicity/backends
+cp adbackend.py /Library/Frameworks/Python.framework/Versions/2.7/lib/python2.7/site-packages/duplicity/backends
 ```
 
-On first usage you will need to open an URL in a browser and copy the resulting URL back into the tool to enable oauth access. The data will be stored in `~/.duplicity_amazondrive_oauthtoken.json`.
+On first usage you will need to open an URL in a browser and copy the resulting URL back into the tool to enable oauth access. The data will be stored in `~/.duplicity_ad_oauthtoken.json`.
 
 
 ## Usage
 ```
-duplicity source_path amazondrive:///backup/my_new_backup
+duplicity source_path ad:///backup/my_new_backup
 ```
 
 # License
